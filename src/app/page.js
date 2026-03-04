@@ -350,6 +350,56 @@ function TimelineCardMockup({ route, rank }) {
                     const airlineIcon = airlineCode ? (AIRLINE_ICONS[airlineCode] || '✈️') : '✈️';
                     const layoverMins = getLayoverMins(i);
 
+                    // ── Smart date progression: prevent dates going backwards ──
+                    const baseDate = new Date(leg.date || route.date);
+
+                    // Work out departure date
+                    let departDate;
+                    if (leg.departureTime) {
+                        departDate = new Date(leg.departureTime);
+                    } else {
+                        departDate = new Date(baseDate);
+                    }
+
+                    // Enforce: this leg's departure must not be before previous leg's arrival
+                    if (i > 0) {
+                        const prevLeg = route.legs[i - 1];
+                        let prevArrival;
+                        if (prevLeg.arrivalTime) {
+                            prevArrival = new Date(prevLeg.arrivalTime);
+                        } else if (prevLeg.departureTime) {
+                            prevArrival = new Date(new Date(prevLeg.departureTime).getTime() + (prevLeg.durationMinutes || 120) * 60000);
+                        }
+
+                        if (prevArrival && departDate < prevArrival) {
+                            // Departure is before previous arrival — push forward by days until it's after
+                            while (departDate < prevArrival) {
+                                departDate.setDate(departDate.getDate() + 1);
+                            }
+                        }
+                    }
+
+                    // Work out arrival date
+                    let arriveDate;
+                    if (leg.arrivalTime) {
+                        arriveDate = new Date(leg.arrivalTime);
+                        // If arrival appears before departure (wrong date context), push forward
+                        if (arriveDate < departDate) {
+                            while (arriveDate < departDate) {
+                                arriveDate.setDate(arriveDate.getDate() + 1);
+                            }
+                        }
+                    } else {
+                        // Estimate: departure + duration
+                        arriveDate = new Date(departDate.getTime() + (leg.durationMinutes || 120) * 60000);
+                    }
+
+                    // Store corrected arrival for next leg's reference
+                    leg._correctedArrival = arriveDate.toISOString();
+
+                    const departDateStr = formatShortDate(departDate.toISOString());
+                    const arriveDateStr = formatShortDate(arriveDate.toISOString());
+
                     return (
                         <div key={i} className="mc-segment-group">
                             {/* Layover badge between segments */}
@@ -375,7 +425,7 @@ function TimelineCardMockup({ route, rank }) {
                                         <div className="mc-time mc-time-code">{leg.origin}</div>
                                     )}
                                     {leg.departureTime && <div className="mc-airport-code">{leg.origin}</div>}
-                                    <div className="mc-leg-date">{formatShortDate(leg.departureTime || leg.date || route.date)}</div>
+                                    <div className="mc-leg-date">{departDateStr}</div>
                                 </div>
 
                                 {/* Connecting line */}
@@ -406,7 +456,7 @@ function TimelineCardMockup({ route, rank }) {
                                         <div className="mc-time mc-time-code">{leg.destination}</div>
                                     )}
                                     {leg.arrivalTime && <div className="mc-airport-code">{leg.destination}</div>}
-                                    <div className="mc-leg-date">{formatShortDate(leg.arrivalTime || leg.date || route.date)}</div>
+                                    <div className="mc-leg-date">{arriveDateStr}</div>
                                 </div>
                             </div>
                         </div>

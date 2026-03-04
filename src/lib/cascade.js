@@ -1558,9 +1558,6 @@ function buildMainLeg(avail, cabin, dest) {
     // Sanity cap: no legitimate reward taxes exceed $5,000 per leg (in any currency)
     const sanitizedTaxesRaw = totalTaxesRaw > 5000 ? 0 : totalTaxesRaw;
 
-    // Convert from origin airport's currency to AUD
-    const sanitizedTaxes = Math.round(convertTaxToAUD(sanitizedTaxesRaw, origAirport));
-
     // Extract times: top-level first, fall back to trip-level
     const departureTime = avail.DepartsAt || matchingTrip?.DepartsAt || null;
     const arrivalTime = avail.ArrivesAt || matchingTrip?.ArrivesAt || null;
@@ -1572,6 +1569,9 @@ function buildMainLeg(avail, cabin, dest) {
     const tripStops = matchingTrip?.Stops || 0;
     const tripConnections = matchingTrip?.Connections || null;
     const estDuration = tripDuration || estimateMultiStopDuration(origAirport, destAirport, tripConnections, tripStops);
+
+    // Convert taxes from origin airport's currency to AUD (now that origAirport is defined)
+    const sanitizedTaxes = Math.round(convertTaxToAUD(sanitizedTaxesRaw, origAirport));
 
     // Extract airlines: prefer flight numbers for accuracy (Carriers lists ALL trip carriers)
     const flightNums = matchingTrip?.FlightNumbers || null;
