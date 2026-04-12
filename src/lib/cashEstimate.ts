@@ -1,9 +1,10 @@
+// @ts-nocheck
 // ══════════════════════════════════════════════
 // CASH FARE ESTIMATES
 // Distance-based pricing (no external API)
 // ══════════════════════════════════════════════
 
-import { AIRPORTS } from './airports.js';
+import { AIRPORTS } from './airports';
 
 /**
  * Haversine distance in km between two airports

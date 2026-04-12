@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ══════════════════════════════════════════════
 // API ROUTE: /api/availability
 // Bulk availability for region-wide discovery

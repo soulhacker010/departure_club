@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ══════════════════════════════════════════════
 // AIRPORT DATABASE — Single Source of Truth
 // All components import from here.

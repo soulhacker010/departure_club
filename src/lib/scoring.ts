@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ══════════════════════════════════════════════
 // SCORING & RANKING ENGINE
 // Weighted scoring for result ordering

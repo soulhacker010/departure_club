@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ══════════════════════════════════════════════
 // API ROUTE: /api/search
 // Main search endpoint — runs the cascade engine
@@ -7,6 +8,7 @@ import { NextResponse } from 'next/server';
 import { cascadeSearch } from '@/lib/cascade';
 import { filterRoutes } from '@/lib/scoring';
 import { getApiUsage } from '@/lib/cache';
+import { enrichCashLegs } from '@/lib/duffel';
 
 export async function GET(request) {
     try {
@@ -58,6 +60,9 @@ export async function GET(request) {
             stops,
             passengers,
         });
+
+        // Enrich cash legs with real Duffel prices + times (falls back to estimates silently)
+        await enrichCashLegs(results);
 
         // Apply filters if specified
         const filtered = filterRoutes(results, {

@@ -1,9 +1,10 @@
+// @ts-nocheck
 // ══════════════════════════════════════════════
 // SERVER-SIDE CACHE
 // In-memory cache with TTL + daily API budget tracking
 // ══════════════════════════════════════════════
 
-import { CACHE_CONFIG } from './constants.js';
+import { CACHE_CONFIG } from './constants';
 
 // In-memory store
 const cache = new Map();

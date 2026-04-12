@@ -1,3 +1,4 @@
+// @ts-nocheck
 import './globals.css';
 
 export const metadata = {

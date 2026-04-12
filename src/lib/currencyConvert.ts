@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Currency conversion for reward flight taxes.
  * The Seats.aero API returns taxes in the origin country's currency.

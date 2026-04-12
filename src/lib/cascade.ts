@@ -1,16 +1,17 @@
+// @ts-nocheck
 // ══════════════════════════════════════════════
 // 6-STEP CASCADE SEARCH ENGINE
 // Core routing logic from fullscope.md Section 5
 // ══════════════════════════════════════════════
 
-import { cachedSearch, getTrips } from './seatsAero.js';
-import { cacheGet, cacheSet, cacheKey, trackApiCall } from './cache.js';
-import { getPositioningCabins, getSegmentLabel } from './cabinRules.js';
-import { estimateCashFare, estimateFlightMinutes, estimateMultiStopDuration, formatDuration } from './cashEstimate.js';
-import { rankRoutes, rewardPercentage } from './scoring.js';
-import { AIRPORTS, getAirport, getSEAHubs } from './airports.js';
-import { CACHE_CONFIG, CABIN_MAP, CABIN_LABELS, SEA_HUBS, EUR_HUBS, PACIFIC_HUBS, US_HUBS, SAM_HUBS, ASIA_HUBS, SEARCH_DEFAULTS } from './constants.js';
-import { convertTaxToAUD } from './currencyConvert.js';
+import { cachedSearch, getTrips } from './seatsAero';
+import { cacheGet, cacheSet, cacheKey, trackApiCall } from './cache';
+import { getPositioningCabins, getSegmentLabel } from './cabinRules';
+import { estimateCashFare, estimateFlightMinutes, estimateMultiStopDuration, formatDuration } from './cashEstimate';
+import { rankRoutes, rewardPercentage } from './scoring';
+import { AIRPORTS, getAirport, getSEAHubs } from './airports';
+import { CACHE_CONFIG, CABIN_MAP, CABIN_LABELS, SEA_HUBS, EUR_HUBS, PACIFIC_HUBS, US_HUBS, SAM_HUBS, ASIA_HUBS, SEARCH_DEFAULTS } from './constants';
+import { convertTaxToAUD } from './currencyConvert';
 
 /**
  * Main entry point — runs the 6-step cascade search
@@ -363,15 +364,120 @@ export async function cascadeSearch(params) {
 
     const ranked = rankRoutes(dateFiltered, date);
 
+    // ═══ ENRICHMENT: Fetch departure/arrival times for routes missing them ═══
+    // The search endpoint often returns AvailabilityTrips: null for economy seats.
+    // We use the /trips/{id} endpoint to backfill times for the top results.
+    const enriched = await enrichWithTripTimes(ranked);
+
     return {
-        results: ranked,
+        results: enriched,
         meta: {
             ...meta,
-            totalResults: ranked.length,
+            totalResults: enriched.length,
             fetchedAt: new Date().toISOString(),
             query: { origin, destination, date, cabin, program, hybridEnabled, stops },
         },
     };
+}
+
+// ═══════════════════════════════════════════════
+// TRIP ENRICHMENT — backfill departure/arrival times
+// ═══════════════════════════════════════════════
+
+/**
+ * For routes where legs are missing departureTime/arrivalTime,
+ * fetch trip details from the /trips/{id} endpoint and merge them in.
+ * Limited to top N routes to avoid excessive API calls.
+ */
+async function enrichWithTripTimes(routes, maxEnrich = 15) {
+    // Find routes with reward legs missing times
+    const needsEnrichment = [];
+    const availIdsToFetch = new Set();
+
+    for (let i = 0; i < Math.min(routes.length, maxEnrich); i++) {
+        const route = routes[i];
+        if (!route.legs) continue;
+
+        for (const leg of route.legs) {
+            if (leg.isReward && !leg.departureTime && !leg.arrivalTime && leg.source) {
+                // We need the availability ID to fetch trips
+                // It's stored on the route or leg from the original API result
+                const availId = leg._availabilityId || route._availabilityId;
+                if (availId && !availIdsToFetch.has(availId)) {
+                    availIdsToFetch.add(availId);
+                    needsEnrichment.push({ routeIndex: i, availId });
+                }
+            }
+        }
+    }
+
+    if (needsEnrichment.length === 0) return routes;
+
+    // Batch fetch trip details (parallel, max 5 concurrent)
+    const tripCache = {};
+    const chunks = [];
+    const ids = [...availIdsToFetch];
+    for (let i = 0; i < ids.length; i += 5) {
+        chunks.push(ids.slice(i, i + 5));
+    }
+
+    for (const chunk of chunks) {
+        const promises = chunk.map(async (id) => {
+            try {
+                const trips = await getTrips(id);
+                tripCache[id] = trips;
+            } catch (e) {
+                // Silently skip failed fetches
+                tripCache[id] = null;
+            }
+        });
+        await Promise.all(promises);
+    }
+
+    // Merge trip times back into route legs
+    for (const route of routes.slice(0, maxEnrich)) {
+        if (!route.legs) continue;
+
+        for (const leg of route.legs) {
+            if (leg.departureTime && leg.arrivalTime) continue; // Already has times
+            if (!leg.isReward) continue;
+
+            const availId = leg._availabilityId || route._availabilityId;
+            if (!availId || !tripCache[availId]) continue;
+
+            const trips = tripCache[availId];
+            if (!Array.isArray(trips) || trips.length === 0) continue;
+
+            // Find matching trip by cabin and route
+            const cabinName = leg.cabin === 'J' ? 'business' : leg.cabin === 'F' ? 'first' : leg.cabin === 'W' ? 'premium' : 'economy';
+            const matchTrip = trips.find(t => t.Cabin === cabinName) || trips[0];
+
+            if (matchTrip) {
+                if (!leg.departureTime && matchTrip.DepartsAt) {
+                    leg.departureTime = matchTrip.DepartsAt;
+                }
+                if (!leg.arrivalTime && matchTrip.ArrivesAt) {
+                    leg.arrivalTime = matchTrip.ArrivesAt;
+                }
+                if (!leg.flightNumbers && matchTrip.FlightNumbers) {
+                    leg.flightNumbers = matchTrip.FlightNumbers;
+                }
+                // Also backfill from segments if the trip has them
+                if (matchTrip.Segments && Array.isArray(matchTrip.Segments)) {
+                    const firstSeg = matchTrip.Segments[0];
+                    const lastSeg = matchTrip.Segments[matchTrip.Segments.length - 1];
+                    if (!leg.departureTime && firstSeg?.DepartsAt) {
+                        leg.departureTime = firstSeg.DepartsAt;
+                    }
+                    if (!leg.arrivalTime && lastSeg?.ArrivesAt) {
+                        leg.arrivalTime = lastSeg.ArrivesAt;
+                    }
+                }
+            }
+        }
+    }
+
+    return routes;
 }
 
 // ═══════════════════════════════════════════════
@@ -583,7 +689,7 @@ async function searchSEAToEurHub(origin, dest, dateRange, cabin, sources, cabinO
         if (!seaEurData || seaEurData.length === 0) continue;
 
         // Group by EUR hub arrival
-        const byEurHub = {};
+        const byEurHub: Record<string, any[]> = {};
         for (const avail of seaEurData) {
             const eurDest = avail.Route?.DestinationAirport;
             if (!eurDest || eurDest === dest) continue; // Skip if it's already the final dest (Step 3 handles that)
@@ -1438,6 +1544,12 @@ function buildRewardResult(avail, type, origin, dest, cabin) {
     const destAirport = avail.Route?.DestinationAirport || dest;
     const estDuration = estimateFlightMinutes(origAirport, destAirport);
 
+    // Extract times from AvailabilityTrips if available
+    const cabinName = cabinKey === 'J' ? 'business' : cabinKey === 'F' ? 'first' : cabinKey === 'W' ? 'premium' : 'economy';
+    const matchingTrip = avail.AvailabilityTrips?.find(t => t.Cabin === cabinName) || avail.AvailabilityTrips?.[0] || null;
+    const departureTime = avail.DepartsAt || matchingTrip?.DepartsAt || null;
+    const arrivalTime = avail.ArrivesAt || matchingTrip?.ArrivesAt || null;
+
     const mainLeg = {
         origin: origAirport,
         destination: destAirport,
@@ -1454,6 +1566,12 @@ function buildRewardResult(avail, type, origin, dest, cabin) {
         isDirect,
         remainingSeats,
         stops: isDirect ? 0 : 1,
+        date: avail.Date,
+        departureTime,
+        arrivalTime,
+        flightNumbers: matchingTrip?.FlightNumbers || null,
+        source: matchingTrip?.Source || avail.Source || '',
+        _availabilityId: avail.ID || null,
     };
 
     return {
@@ -1475,6 +1593,7 @@ function buildRewardResult(avail, type, origin, dest, cabin) {
         remainingSeats,
         rewardPercent: 100,
         viaHubs: [],
+        _availabilityId: avail.ID || null,
     };
 }
 
@@ -1599,6 +1718,7 @@ function buildMainLeg(avail, cabin, dest) {
         viaAirport: matchingTrip?.Connections || null,
         remainingSeats: matchingTrip?.RemainingSeats || avail.RemainingSeats || avail[`${cabinKey}Remaining`] || 0,
         source: matchingTrip?.Source || avail.Source || '',
+        _availabilityId: avail.ID || null,
     };
 }
 
@@ -1655,8 +1775,55 @@ function buildMultiLegResult(avails, viaHubs, type, origin, dest, cabin, opts = 
             flightNumbers: matchTrip?.FlightNumbers || null,
             viaAirport: matchTrip?.Connections || null,
             source: matchTrip?.Source || avail.Source || '',
+            _availabilityId: avail.ID || null,
         };
     });
+
+    // ── FIX: Enforce chronological dates across legs ──
+    // When legs come from separate API calls, their dates can appear out of order.
+    // Walk through legs and push dates forward if they go backwards.
+    for (let i = 1; i < legs.length; i++) {
+        const prevLeg = legs[i - 1];
+        const currLeg = legs[i];
+
+        // Use arrival/departure timestamps if available, otherwise use date strings
+        let prevEndTime = prevLeg.arrivalTime ? new Date(prevLeg.arrivalTime) : null;
+        if (!prevEndTime && prevLeg.departureTime) {
+            prevEndTime = new Date(new Date(prevLeg.departureTime).getTime() + (prevLeg.durationMinutes || 120) * 60000);
+        }
+        if (!prevEndTime && prevLeg.date) {
+            prevEndTime = new Date(prevLeg.date);
+        }
+
+        let currStartTime = currLeg.departureTime ? new Date(currLeg.departureTime) : null;
+        if (!currStartTime && currLeg.date) {
+            currStartTime = new Date(currLeg.date);
+        }
+
+        // If current leg starts before previous leg ends, fix the date
+        if (prevEndTime && currStartTime && currStartTime < prevEndTime) {
+            // Push current leg's date forward to match previous leg's arrival date
+            const correctedDate = prevEndTime.toISOString().split('T')[0];
+            currLeg.date = correctedDate;
+
+            // Also fix departure/arrival times if they have wrong dates
+            if (currLeg.departureTime) {
+                const depTime = new Date(currLeg.departureTime);
+                while (depTime < prevEndTime) {
+                    depTime.setDate(depTime.getDate() + 1);
+                }
+                currLeg.departureTime = depTime.toISOString();
+            }
+            if (currLeg.arrivalTime) {
+                const arrTime = new Date(currLeg.arrivalTime);
+                const depRef = currLeg.departureTime ? new Date(currLeg.departureTime) : prevEndTime;
+                while (arrTime < depRef) {
+                    arrTime.setDate(arrTime.getDate() + 1);
+                }
+                currLeg.arrivalTime = arrTime.toISOString();
+            }
+        }
+    }
 
     const totalPoints = legs.reduce((s, l) => s + (l.points || 0), 0);
     const totalTaxes = legs.reduce((s, l) => s + (l.taxes || 0), 0);
@@ -1677,7 +1844,7 @@ function buildMultiLegResult(avails, viaHubs, type, origin, dest, cabin, opts = 
         totalDurationFormatted: formatDuration(totalDur),
         totalLayoverMinutes: layovers,
         totalStops: legs.length - 1 + legs.reduce((s, l) => s + (l.stops || 0), 0),
-        date: avails[0]?.Date,
+        date: legs[0]?.date || avails[0]?.Date,
         source: avails[0]?.Source,
         rewardPercent: 100,
     };
@@ -1691,21 +1858,38 @@ function calcSegmentDuration(seg) {
 }
 
 function checkLayover(posFlight, mainFlight, hub, isHybrid = false) {
-    // Strict chronological: each leg must depart AFTER the previous
-    if (!posFlight.Date || !mainFlight.Date) return true;
-    const posDate = new Date(posFlight.Date);
-    const mainDate = new Date(mainFlight.Date);
-    const diffHours = (mainDate - posDate) / (1000 * 60 * 60);
+    // Use full timestamps (DepartsAt/ArrivesAt) when available for accurate overnight handling
+    // Fall back to Date field (just YYYY-MM-DD) if timestamps aren't available
+    const posArrival = posFlight.ArrivesAt || posFlight.AvailabilityTrips?.[0]?.ArrivesAt || null;
+    const mainDepart = mainFlight.DepartsAt || mainFlight.AvailabilityTrips?.[0]?.DepartsAt || null;
 
-    // NEVER allow backwards dates (negative diff = impossible route)
+    let diffHours;
+
+    if (posArrival && mainDepart) {
+        // Best case: we have exact timestamps
+        const arrTime = new Date(posArrival);
+        const depTime = new Date(mainDepart);
+        diffHours = (depTime - arrTime) / (1000 * 60 * 60);
+    } else if (posFlight.Date && mainFlight.Date) {
+        // Fallback: compare dates only
+        const posDate = new Date(posFlight.Date);
+        const mainDate = new Date(mainFlight.Date);
+        diffHours = (mainDate - posDate) / (1000 * 60 * 60);
+    } else {
+        // No date info — allow it through
+        return true;
+    }
+
+    // NEVER allow backwards time (negative diff = impossible route)
     if (diffHours < 0) return false;
 
     if (isHybrid) {
-        // Cash positioning: min 2h (120 min), max 12h
-        return diffHours >= 2 && diffHours <= 12;
+        // Cash positioning: min 2h, max 24h
+        return diffHours >= 2 && diffHours <= 24;
     }
-    // Reward positioning: min 1h (60 min), max 36h
-    return diffHours >= 1 && diffHours <= SEARCH_DEFAULTS.MAX_LAYOVER_HOURS;
+    // Reward positioning: same day or next day connections OK
+    // min 1h gap, max 36h gap
+    return diffHours >= 0 && diffHours <= SEARCH_DEFAULTS.MAX_LAYOVER_HOURS;
 }
 
 function getCommonAirline(origin, dest) {

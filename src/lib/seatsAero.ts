@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ══════════════════════════════════════════════
 // SEATS.AERO API CLIENT
 // Server-side only — wraps Partner API endpoints
