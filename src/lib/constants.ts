@@ -72,7 +72,9 @@ export const CACHE_CONFIG = {
 export const SEARCH_DEFAULTS = {
     MAX_RESULTS: 10,
     DATE_RANGE_DAYS: 2,              // ±2 days from selected date
-    MAX_LAYOVER_HOURS: 36,
+    MIN_LAYOVER_HOURS: 2.5,          // 2.5 hours minimum connection time
+    MAX_LAYOVER_HOURS: 8,            // 8 hours max (normal)
+    MAX_LAYOVER_HOURS_OVERNIGHT: 36, // 36 hours max (overnight layover enabled)
     MAX_STOPS_REWARD: 2,
     MAX_CASH_LEGS_STEP5: 1,
     MAX_CASH_LEGS_STEP6: 2,

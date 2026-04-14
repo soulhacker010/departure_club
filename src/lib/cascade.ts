@@ -40,6 +40,7 @@ export async function cascadeSearch(params) {
         stops = 'any',
         passengers = 1,
         cabinOverrides = null,
+        overnightLayover = false,
     } = params;
 
     const cabinCode = CABIN_MAP[cabin] || 'J';
@@ -627,7 +628,7 @@ async function searchSEAToDestination(origin, dest, dateRange, cabin, sources, c
                 const mainDate = mainFlight.Date ? new Date(mainFlight.Date) : null;
                 if (posDate && mainDate && mainDate < posDate) continue; // Skip backwards
 
-                const layoverOk = checkLayover(posFlight, mainFlight, hub);
+                const layoverOk = checkLayover(posFlight, mainFlight, hub, false, overnightLayover);
                 if (!layoverOk) continue;
 
                 results.push(buildMultiLegResult(
@@ -1202,7 +1203,7 @@ async function searchPacificToUSA(origin, dest, dateRange, cabin, sources, cabin
                 const mainDate = mainFlight.Date ? new Date(mainFlight.Date) : null;
                 if (posDate && mainDate && mainDate < posDate) continue;
 
-                const layoverOk = checkLayover(posFlight, mainFlight, hub);
+                const layoverOk = checkLayover(posFlight, mainFlight, hub, false, overnightLayover);
                 if (!layoverOk) continue;
 
                 results.push(buildMultiLegResult(
@@ -1380,7 +1381,7 @@ async function searchSEAToGlobalDest(origin, dest, dateRange, cabin, sources, ca
                 const mainDate = mainFlight.Date ? new Date(mainFlight.Date) : null;
                 if (posDate && mainDate && mainDate < posDate) continue;
 
-                const layoverOk = checkLayover(posFlight, mainFlight, hub);
+                const layoverOk = checkLayover(posFlight, mainFlight, hub, false, overnightLayover);
                 if (!layoverOk) continue;
 
                 results.push(buildMultiLegResult(
@@ -1857,7 +1858,7 @@ function calcSegmentDuration(seg) {
     return Math.round((arr - dep) / 60000);
 }
 
-function checkLayover(posFlight, mainFlight, hub, isHybrid = false) {
+function checkLayover(posFlight, mainFlight, hub, isHybrid = false, overnightAllowed = false) {
     // Use full timestamps (DepartsAt/ArrivesAt) when available for accurate overnight handling
     // Fall back to Date field (just YYYY-MM-DD) if timestamps aren't available
     const posArrival = posFlight.ArrivesAt || posFlight.AvailabilityTrips?.[0]?.ArrivesAt || null;
@@ -1883,13 +1884,12 @@ function checkLayover(posFlight, mainFlight, hub, isHybrid = false) {
     // NEVER allow backwards time (negative diff = impossible route)
     if (diffHours < 0) return false;
 
-    if (isHybrid) {
-        // Cash positioning: min 2h, max 24h
-        return diffHours >= 2 && diffHours <= 24;
-    }
-    // Reward positioning: same day or next day connections OK
-    // min 1h gap, max 36h gap
-    return diffHours >= 0 && diffHours <= SEARCH_DEFAULTS.MAX_LAYOVER_HOURS;
+    const minHours = SEARCH_DEFAULTS.MIN_LAYOVER_HOURS;          // 2.5h
+    const maxHours = overnightAllowed
+        ? SEARCH_DEFAULTS.MAX_LAYOVER_HOURS_OVERNIGHT             // 36h
+        : SEARCH_DEFAULTS.MAX_LAYOVER_HOURS;                      // 8h
+
+    return diffHours >= minHours && diffHours <= maxHours;
 }
 
 function getCommonAirline(origin, dest) {

@@ -33,6 +33,7 @@ export async function GET(request) {
         const stops = searchParams.get('stops') || 'any';
         const passengers = parseInt(searchParams.get('passengers') || '1', 10);
         const endDate = searchParams.get('endDate') || '';
+        const overnightLayover = searchParams.get('overnight') === 'true';
 
         // Filter params
         const sortBy = searchParams.get('sortBy');
@@ -59,6 +60,7 @@ export async function GET(request) {
             hybridEnabled,
             stops,
             passengers,
+            overnightLayover,
         });
 
         // Enrich cash legs with real Duffel prices + times (falls back to estimates silently)

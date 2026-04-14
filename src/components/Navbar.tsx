@@ -8,7 +8,7 @@ export default function Navbar() {
                 <img src="/logo-white.webp" alt="Departure Club" className="logo-img" />
             </a>
             <div className="nav-links">
-                <button className="nav-pill active">Search</button>
+                <a href="/login" className="nav-pill">Sign in</a>
                 <button className="nav-pill">How It Works</button>
                 <button className="nav-badge">
                     <span className="pulse"></span>

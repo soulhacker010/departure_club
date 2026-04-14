@@ -23,6 +23,7 @@ export default function SearchPanel({ onSearch, loading }) {
 
     const [rewardPosCabin, setRewardPosCabin] = useState('auto');
     const [cashPosCabin, setCashPosCabin] = useState('auto');
+    const [overnightLayover, setOvernightLayover] = useState(false);
 
     function getDefaultDate() {
         const d = new Date();
@@ -55,7 +56,7 @@ export default function SearchPanel({ onSearch, loading }) {
             date: startDate,
             endDate: endDate || undefined,
             cabin, program,
-            hybridEnabled, stops, passengers,
+            hybridEnabled, stops, passengers, overnightLayover,
         };
 
         if (constraints.trim()) params.constraints = constraints.trim();
@@ -194,6 +195,22 @@ export default function SearchPanel({ onSearch, loading }) {
                             <option value="W">Premium Economy</option>
                             <option value="J">Business</option>
                         </select>
+                    </div>
+
+                    <div className="advanced-group">
+                        <label>Overnight Layover</label>
+                        <div className="overnight-toggle-row">
+                            <button
+                                type="button"
+                                className={`overnight-toggle-btn ${overnightLayover ? 'overnight-on' : ''}`}
+                                onClick={() => setOvernightLayover(!overnightLayover)}
+                            >
+                                {overnightLayover ? '✓ On' : 'Off'}
+                            </button>
+                            <span className="overnight-hint">
+                                {overnightLayover ? 'Up to 36h layovers allowed' : 'Max 8h layovers (default)'}
+                            </span>
+                        </div>
                     </div>
 
                     <div className="advanced-group constraints-group">
